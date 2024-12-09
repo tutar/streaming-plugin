@@ -30,6 +30,7 @@ resource/vits-melo-tts-zh_en/
 *.ipch
 x64/
 Win32/
+*.exe
 
 #IDE配置文件
 *.suo
