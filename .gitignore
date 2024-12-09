@@ -1,0 +1,56 @@
+
+.vscode/
+.vs/
+
+# sherpa-onnx 依赖文件
+lib/cargs.lib 
+lib/espeak-ng.lib 
+lib/kaldi-decoder-core.lib 
+lib/kaldi-native-fbank-core.lib 
+lib/onnxruntime.lib 
+lib/piper_phonemize.lib 
+lib/sherpa-onnx-c-api.lib 
+lib/sherpa-onnx-core.lib 
+lib/sherpa-onnx-cxx-api.lib 
+lib/sherpa-onnx-fst.lib 
+lib/sherpa-onnx-fstfar.lib 
+lib/sherpa-onnx-kaldifst-core.lib 
+lib/sherpa-onnx-portaudio_static.lib 
+lib/ssentencepiece_core.lib 
+lib/ucd.lib
+
+#模型文件
+resource/vits-melo-tts-zh_en/
+
+# 编译生成的文件和目录：
+*.obj
+*.o
+*.pdb
+*.idb
+*.ipch
+x64/
+Win32/
+
+#IDE配置文件
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# 构建日志和临时文件：
+*.log
+*.tlog
+*.VC.db
+
+# 备份文件：
+*.bak
+*.swp
+
+# 编译时生成的其他文件：
+*.aps
+*.ncb
+*.opendb
+
+# 其他可能的临时或缓存文件：
+*.tmp
+temp/
