@@ -1,10 +1,7 @@
 ﻿#include "AVDemuxer.h"
 #include <iostream>
 #include "libswresample/swresample_internal.h"
-
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
-
+#include "DouYin.h"
 
 #define LOG_FILTER_ERROR(ret) \
     do { \
@@ -614,8 +611,8 @@ namespace IPCDemo
 		a_buffersinkFilter = NULL;
 		a_mixFilter = NULL;
 	}
-	// 1. transformMasterAudioFrame 函数修改
-	int transformMasterAudioFrameTest(AVFrame* masterFrame, const FF_AV_SAMPLES& samples)
+	
+	int transformMasterAudioFrame(AVFrame* masterFrame, const FF_AV_SAMPLES& samples)
 	{
 		if (!masterFrame || samples.data.empty()) {
 			return -1;
@@ -661,57 +658,7 @@ namespace IPCDemo
 		return masterFrame->nb_samples;  // 返回实际处理的样本数
 	}
 
-	BOOL transformMasterAudioFrame(AVFrame* frame,FF_AV_SAMPLES s) {
-
-		std::vector<float> samples = s.data;
-		frame->channels = 1;
-		frame->nb_samples = samples.size(); // 假设是单声道
-		frame->sample_rate = s.sampleRate;
-		frame->format = AV_SAMPLE_FMT_FLTP; // 使用float格式
-		frame->channel_layout = AV_CH_LAYOUT_MONO;
-
-		// 分配输出帧缓冲区
-		int ret = av_frame_get_buffer(frame, 0);
-		if (ret < 0) {
-			char errbuf[1024];
-			av_strerror(ret, errbuf, sizeof(errbuf));
-			std::cerr << "Failed to allocate output frame buffer: " << errbuf << std::endl;
-			return false;
-		}
-		// 确保帧数据可写
-		ret = av_frame_make_writable(frame);
-		if (ret < 0) {
-			char errbuf[1024];
-			av_strerror(ret, errbuf, sizeof(errbuf));
-			std::cerr << "Failed to make frame writable: " << errbuf << std::endl;
-			return false;
-		}
-
-		// 将GeneratedAudio的样本复制到AVFrame的缓冲区
-		float* frame_ptr = (float*)frame->extended_data[0];
-		for (int i = 0; i < samples.size(); i++) {
-			*frame_ptr++ = samples[i];
-		}
-		return true;
-	}
-
-
-	BOOL popMasterFrameIfExist(AVFrame* masterAudioFrame) {
-		// 从缓冲区中获取AVFrame，并输出到滤镜，成功则从缓冲区删除
-		std::lock_guard<std::mutex> lock(g_av_buffer.mutex);
-		if (g_av_buffer.samples.empty()) {
-			// 还没主音频数据
-			return false;
-		}
-		const FF_AV_SAMPLES s = g_av_buffer.samples.front();
-		int ret = transformMasterAudioFrame(masterAudioFrame, s);
-		if (ret < 0) {
-			return false;
-		}
-		g_av_buffer.samples.pop();
-		return true;
-	}
-	int getMasterFrameIfExistTest(AVFrame* masterFrame)
+	int getMasterFrameIfExist()
 	{
 		std::lock_guard<std::mutex> lock(g_av_buffer.mutex);
 
@@ -731,211 +678,6 @@ namespace IPCDemo
 		}
 
 		return 1;  // 有足够的数据可用
-	}
-
-	//// 重采样生成主音频并一次性输出到文件
-	void resampleAudio(AVFrame* firstFrame) {
-		
-		AVRational   tb;
-		AVFormatContext* fmt_ctx = nullptr;
-		AVStream* out_stream = nullptr;
-		AVCodecContext* encoder_ctx = nullptr;
-		AVFrame* masterAudioFrame = nullptr;
-		AVFrame* output_frame = nullptr;
-		SwrContext* swr_ctx = nullptr;
-		AVPacket pkt;
-		int ret;
-
-		// 1.1输出上下文
-		const AVOutputFormat* ofmt = av_guess_format("mp3", nullptr, nullptr);
-		ret = avformat_alloc_output_context2(&fmt_ctx, ofmt, ofmt->name, "D:\\open\\Livestreaming\\output-generate.mp3");
-		if (!fmt_ctx || ret < 0) {
-			std::cerr << "Could not create output context\n";
-			return;
-		}
-		// 1.2 输出流
-		out_stream = avformat_new_stream(fmt_ctx, nullptr);
-		if (!out_stream) {
-			std::cerr << "Failed to create new stream\n";
-			return;
-		}
-		// 1.3初始化编码器
-		const AVCodec* encoder = avcodec_find_encoder(AV_CODEC_ID_MP3);
-		if (!encoder) {
-			fprintf(stderr, "Codec not found\n");
-			return;
-		}
-		// 1.4编码器上下文
-		encoder_ctx = avcodec_alloc_context3(encoder);
-		if (!encoder_ctx) {
-			fprintf(stderr, "Could not allocate audio codec context\n");
-			return;
-		}
-		// 1.4.1 首先确保编码器参数正确设置
-		encoder_ctx->bit_rate = 128000;
-		encoder_ctx->channel_layout = AV_CH_LAYOUT_STEREO;  // 3 表示立体声布局
-		encoder_ctx->channels = 2;
-		encoder_ctx->sample_rate = 44100;
-		encoder_ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;  // MP3编码器需要浮点格式
-		tb = { 1, out_stream->codecpar->sample_rate };
-		encoder_ctx->time_base = tb;
-		// 1.4.2
-		if (avcodec_open2(encoder_ctx, encoder, NULL) < 0) {
-			fprintf(stderr, "Could not open codec\n");
-			return;
-		}
-		// 1.4.3. 从编码器上下文复制参数到输出流
-		ret = avcodec_parameters_from_context(out_stream->codecpar, encoder_ctx);
-		if (ret < 0) {
-			std::cerr << "Could not copy codec params to stream\n";
-			return;
-		}
-		// 1.5 打开输出文件
-		if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-			if (avio_open(&fmt_ctx->pb, "D:\\open\\Livestreaming\\output-generate.mp3", AVIO_FLAG_WRITE) < 0) {
-				std::cerr << "Could not open output file\n";
-				return;
-			}
-		}
-		// 1.6写入文件头
-		ret = avformat_write_header(fmt_ctx, nullptr);
-		if (ret < 0) {
-			std::cerr << "Error occurred when opening output file\n";
-			return;
-		}
-		// 设置音频流参数
-		// 1.7. 确保输出流参数与编码器一致
-		out_stream->codecpar->codec_id = AV_CODEC_ID_MP3; // PCM = AV_CODEC_ID_PCM_SLE; // PCM 16-bit little-endian
-		out_stream->codecpar->codec_type = encoder->type;// AVMEDIA_TYPE_AUDIO;
-		out_stream->codecpar->channel_layout = encoder_ctx->channel_layout;
-		out_stream->codecpar->channels = encoder_ctx->channels;
-		out_stream->codecpar->sample_rate = encoder_ctx->sample_rate;
-		out_stream->codecpar->format = encoder_ctx->sample_fmt;
-		// 创建 SwrContext 并设置参数
-		// 2.0. 使用新的方式初始化重采样器
-		swr_ctx = swr_alloc();
-		if (!swr_ctx) {
-			std::cerr << "Could not allocate SwrContext\n";
-			return;
-		}
-		// 2.1. 明确设置重采样器参数
-		av_opt_set_channel_layout(swr_ctx, "in_channel_layout", firstFrame->channel_layout, 0);
-		av_opt_set_channel_layout(swr_ctx, "out_channel_layout", encoder_ctx->channel_layout, 0);
-		av_opt_set_int(swr_ctx, "in_sample_rate", firstFrame->sample_rate, 0);
-		av_opt_set_int(swr_ctx, "out_sample_rate", encoder_ctx->sample_rate, 0);
-		av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", (enum AVSampleFormat)firstFrame->format, 0);
-		av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", encoder_ctx->sample_fmt, 0);
-		// 2.3 初始化重采样器
-		ret = swr_init(swr_ctx);
-		if (ret < 0) {
-			char errbuf[1024];
-			av_strerror(ret, errbuf, sizeof(errbuf));
-			std::cerr << "Failed to initialize resampler: " << errbuf << std::endl;
-			swr_free(&swr_ctx);
-			return;
-		}
-		// 添加采样计数器
-		int64_t total_samples = 0;  // 用于跟踪已处理的采样数
-		av_init_packet(&pkt);
-		output_frame = av_frame_alloc();
-		masterAudioFrame = av_frame_alloc();
-		if (!output_frame || !masterAudioFrame) {
-			goto _END;
-		}
-
-		while(popMasterFrameIfExist(masterAudioFrame)){
-			// 3.0
-			// 设置输出帧的参数，直接从 out_stream 的 codecpar 获取
-			output_frame->channel_layout = encoder_ctx->channel_layout;
-			output_frame->channels = encoder_ctx->channel_layout;
-			output_frame->sample_rate = encoder_ctx->sample_rate;
-			output_frame->format = encoder_ctx->sample_fmt;
-			output_frame->nb_samples = encoder_ctx->frame_size;  // 使用输入帧的采样数
-			// 分配输出帧缓冲区
-			ret = av_frame_get_buffer(output_frame, 0);
-			if (ret < 0) {
-				char errbuf[1024];
-				av_strerror(ret, errbuf, sizeof(errbuf));
-				std::cerr << "Failed to allocate output frame buffer: " << errbuf << std::endl;
-				goto _END;
-			}
-			// 确保帧数据可写
-			ret = av_frame_make_writable(output_frame);
-			if (ret < 0) {
-				char errbuf[1024];
-				av_strerror(ret, errbuf, sizeof(errbuf));
-				std::cerr << "Failed to make frame writable: " << errbuf << std::endl;
-				goto _END;
-			}
-
-
-			// 执行重采样
-			ret = swr_convert_frame(swr_ctx, output_frame, masterAudioFrame);
-			if (ret < 0) {
-				char errbuf[1024];
-				av_strerror(ret, errbuf, sizeof(errbuf));
-				std::cerr << "Failed to convert frame: " << errbuf << std::endl;
-
-				// 打印更多调试信息
-				std::cout << "Failed frame details:" << std::endl;
-				std::cout << "SwrContext state:"
-					<< "\n  in_channel_layout: " << swr_ctx->in_ch_layout
-					<< "\n  out_channel_layout: " << swr_ctx->out_ch_layout
-					<< "\n  in_sample_rate: " << swr_ctx->in_sample_rate
-					<< "\n  out_sample_rate: " << swr_ctx->out_sample_rate
-					<< std::endl;
-				goto _END;
-			}
-			// 设置输出帧的时间戳
-			tb = { 1, encoder_ctx->sample_rate };
-			output_frame->pts = av_rescale_q(total_samples, tb, encoder_ctx->time_base);
-			total_samples += output_frame->nb_samples;
-			// 将 AVFrame 转换为 AVPacket
-			// 将 AVFrame 发送给编码器，并将 AVFrame 转换为 AVPacket
-			ret = avcodec_send_frame(encoder_ctx, output_frame);
-			if (ret < 0) {
-				char errbuf[1024];
-				av_strerror(ret, errbuf, sizeof(errbuf));
-				std::cerr << "Error sending frame to encoder: " << errbuf << std::endl;
-				std::cerr << "Frame details:" << std::endl;
-				std::cerr << "  format: " << output_frame->format << std::endl;
-				std::cerr << "  channels: " << output_frame->channels << std::endl;
-				std::cerr << "  samples: " << output_frame->nb_samples << std::endl;
-				std::cerr << "  linesize[0]: " << output_frame->linesize[0] << std::endl;
-				goto _END;
-			}
-			// 接收编码后的 AVPacket
-			while ((ret = avcodec_receive_packet(encoder_ctx, &pkt))
-				== 0) {
-				// 设置 packet 的流索引
-				pkt.stream_index = out_stream->index;
-
-				// 将 packet 写入输出文件
-				if (av_interleaved_write_frame(fmt_ctx, &pkt) < 0) {
-					fprintf(stderr, "Error muxing packet\n");
-					goto _END;
-				}
-				//// 释放 packet
-				//av_packet_unref(&pkt);
-			}
-			av_frame_unref(masterAudioFrame);
-		}
-
-
-	_END:
-
-		// 清理...
-		av_frame_free(&output_frame);
-		swr_free(&swr_ctx);
-		avcodec_free_context(&encoder_ctx);
-		// 写入文件尾
-		av_packet_unref(&pkt); // 清理最后的pkt
-		av_write_trailer(fmt_ctx);
-		// 清理资源
-		if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-			avio_close(fmt_ctx->pb);
-		}
-		avformat_free_context(fmt_ctx);
 	}
 
 	BOOL AVDemuxer::InitializeAFilter(AVFrame* audio,AVFrame* master)
@@ -983,21 +725,33 @@ namespace IPCDemo
 			return false;
 		}
 
-		//// 创建 volume filter (用于降低音乐音量)
-		//AVFilterContext* volume_ctx = nullptr;
-		//ret = avfilter_graph_create_filter(&volume_ctx,
-		//	avfilter_get_by_name("volume"), "volume",
-		//	"volume=0.05", nullptr, a_graph);
-		//if (ret < 0) {
-		//	LOG_FILTER_ERROR(ret);
-		//	return false;
-		//}
+		// 创建 volume filter (用于提高主播音量)
+		const char* volumeArgs = std::string("volume=").append(std::to_string(DouYin::Config::getInstance().getAiVolume())).c_str();
+		AVFilterContext* volume_ctx = nullptr;
+		ret = avfilter_graph_create_filter(&volume_ctx,
+			avfilter_get_by_name("volume"), "volume",
+			volumeArgs, nullptr, a_graph);
+		if (ret < 0) {
+			LOG_FILTER_ERROR(ret);
+			return false;
+		}
+
+		// 创建 volume filter (用于提高主播音量)
+		const char* bgVolumeArgs = std::string("volume=").append(std::to_string(DouYin::Config::getInstance().getBgVideoVolume())).c_str();
+		AVFilterContext* bg_volume_ctx = nullptr;
+		ret = avfilter_graph_create_filter(&bg_volume_ctx,
+			avfilter_get_by_name("volume"), "volume",
+			bgVolumeArgs, nullptr, a_graph);
+		if (ret < 0) {
+			LOG_FILTER_ERROR(ret);
+			return false;
+		}
 
 		// 创建 amix filter
 		AVFilterContext* amix_ctx = nullptr;
 		ret = avfilter_graph_create_filter(&amix_ctx,
 			avfilter_get_by_name("amix"), "amix",
-			"inputs=2:duration=longest", nullptr, a_graph);
+			"inputs=2:duration=longest:dropout_transition=3:weights=\"0.25 1\"", nullptr, a_graph);
 		if (ret < 0) {
 			LOG_FILTER_ERROR(ret);
 			return false;
@@ -1036,20 +790,25 @@ namespace IPCDemo
 		}
 
 		// 连接 filters
-		// 音乐: src -> volume -> amix
-		ret = avfilter_link(a_bufferFilter, 0, amix_ctx, 0);
+		// 音乐: src ->bgVolume -> amix
+		ret = avfilter_link(a_bufferFilter, 0, bg_volume_ctx, 0);
 		if (ret < 0) {
 			LOG_FILTER_ERROR(ret);
 			return false;
 		}
-		//ret = avfilter_link(volume_ctx, 0, amix_ctx, 0);
-		//if (ret < 0) {
-		//	LOG_FILTER_ERROR(ret);
-		//	return false;
-		//}
+		ret = avfilter_link(bg_volume_ctx, 0, amix_ctx, 0);
+		if (ret < 0) {
+			LOG_FILTER_ERROR(ret);
+			return false;
+		}
 
-		// 语音: src -> amix
-		ret = avfilter_link(a_bufferMasterFilter, 0, amix_ctx, 1);
+		// 语音: src -> volume-> amix
+		ret = avfilter_link(a_bufferMasterFilter, 0, volume_ctx, 0);
+		if (ret < 0) {
+			LOG_FILTER_ERROR(ret);
+			return false;
+		}
+		ret = avfilter_link(volume_ctx, 0, amix_ctx, 1);
 		if (ret < 0) {
 			LOG_FILTER_ERROR(ret);
 			return false;
@@ -1347,103 +1106,114 @@ namespace IPCDemo
 
 
 		AVFormatContext* fmt_ctx = nullptr;
-		const AVOutputFormat* ofmt = av_guess_format("mp3", nullptr, nullptr);
-		int ret = avformat_alloc_output_context2(&fmt_ctx, ofmt, ofmt->name, "D:\\open\\Livestreaming\\output.mp3");
-		if (!fmt_ctx || ret<0) {
-			std::cerr << "Could not create output context\n";
-			return ;
-		}
-		// 添加音频流
-		AVStream* out_stream = avformat_new_stream(fmt_ctx, nullptr);
-		if (!out_stream) {
-			std::cerr << "Failed to create new stream\n";
-			return ;
-		}
-		//初始化编码器
+		int ret;
+		AVStream* out_stream=nullptr;
 		const AVCodec* encoder = avcodec_find_encoder(AV_CODEC_ID_MP3);
-		if (!encoder) {
-			fprintf(stderr, "Codec not found\n");
-			return;
-		}
-		// 分配并初始化编码器上下文
-		AVCodecContext* encoder_ctx = avcodec_alloc_context3(encoder);
-		if (!encoder_ctx) {
-			fprintf(stderr, "Could not allocate audio codec context\n");
-			return;
-		}
-		//
-		// 1. 首先确保编码器参数正确设置
-		encoder_ctx->bit_rate = 128000;
-		encoder_ctx->channel_layout = AV_CH_LAYOUT_STEREO;  // 3 表示立体声布局
-		encoder_ctx->channels = 2;
-		encoder_ctx->sample_rate = 44100;
-		encoder_ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;  // MP3编码器需要浮点格式
-		tb = { 1, out_stream->codecpar->sample_rate };
-		encoder_ctx->time_base = tb;
-		// 打开编码器
-		if (avcodec_open2(encoder_ctx, encoder, NULL) < 0) {
-			fprintf(stderr, "Could not open codec\n");
-			return;
-		}
-		// 7. 从编码器上下文复制参数到输出流
-		ret = avcodec_parameters_from_context(out_stream->codecpar, encoder_ctx);
-		if (ret < 0) {
-			std::cerr << "Could not copy codec params to stream\n";
-			return;
-		}
-		// 打开输出文件
-		if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-			if (avio_open(&fmt_ctx->pb, "D:\\open\\Livestreaming\\output.mp3", AVIO_FLAG_WRITE) < 0) {
-				std::cerr << "Could not open output file\n";
-				return;
-			}
-		}
-		// 写入文件头
-		ret = avformat_write_header(fmt_ctx, nullptr);
-		if (ret < 0) {
-			std::cerr << "Error occurred when opening output file\n";
-			return ;
-		}
-		// 设置音频流参数
-		// 2. 确保输出流参数与编码器一致
-		out_stream->codecpar->codec_id = AV_CODEC_ID_MP3; // PCM = AV_CODEC_ID_PCM_SLE; // PCM 16-bit little-endian
-		out_stream->codecpar->codec_type = encoder->type;// AVMEDIA_TYPE_AUDIO;
-		out_stream->codecpar->channel_layout = encoder_ctx->channel_layout;
-		out_stream->codecpar->channels = encoder_ctx->channels;
-		out_stream->codecpar->sample_rate = encoder_ctx->sample_rate;
-		out_stream->codecpar->format = encoder_ctx->sample_fmt;
-		// 创建 SwrContext 并设置参数
-		// 3. 使用新的方式初始化重采样器
-		SwrContext* swr_ctx = swr_alloc();
-		if (!swr_ctx) {
-			std::cerr << "Could not allocate SwrContext\n";
-			return;
-		}
-		// 3. 明确设置重采样器参数
-		av_opt_set_channel_layout(swr_ctx, "in_channel_layout", m_audio.m_context->channel_layout, 0);
-		av_opt_set_channel_layout(swr_ctx, "out_channel_layout", encoder_ctx->channel_layout, 0);
-		av_opt_set_int(swr_ctx, "in_sample_rate", m_audio.m_context->sample_rate, 0);
-		av_opt_set_int(swr_ctx, "out_sample_rate", encoder_ctx->sample_rate, 0);
-		av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", m_audio.m_context->sample_fmt, 0);
-		av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", encoder_ctx->sample_fmt, 0);
-		// 5. 初始化重采样器
-		ret = swr_init(swr_ctx);
-		if (ret < 0) {
-			char errbuf[1024];
-			av_strerror(ret, errbuf, sizeof(errbuf));
-			std::cerr << "Failed to initialize resampler: " << errbuf << std::endl;
-			swr_free(&swr_ctx);
-			return;
-		}
-		// 添加采样计数器
+		AVCodecContext* encoder_ctx = nullptr;
+		SwrContext* swr_ctx = nullptr;
 		BOOL first = TRUE;  // 标志first
 		int64_t total_samples = 0;  // 用于跟踪已处理的采样数
 		AVPacket pkt;
-		av_init_packet(&pkt);
-		AVFrame* output_frame = av_frame_alloc();
-		AVFrame* resampled_master = av_frame_alloc();
-		if (!output_frame||!resampled_master) {
-			goto _END;
+		AVFrame* output_frame = nullptr;
+		AVFrame* resampled_master = nullptr;
+		CSimpleIniA& iniConfig = DouYin::Config::getInstance().getIniConfig();
+		if ("DEBUG" == iniConfig.GetValue("log", "DEBUG")) {
+			fmt_ctx = nullptr;
+			const AVOutputFormat* ofmt = av_guess_format("mp3", nullptr, nullptr);
+			ret = avformat_alloc_output_context2(&fmt_ctx, ofmt, ofmt->name, iniConfig.GetValue("log", "amixAudioFilePath"));
+			if (!fmt_ctx || ret < 0) {
+				std::cerr << "Could not create output context\n";
+				return;
+			}
+			// 添加音频流
+			out_stream = avformat_new_stream(fmt_ctx, nullptr);
+			if (!out_stream) {
+				std::cerr << "Failed to create new stream\n";
+				return;
+			}
+			//初始化编码器
+			//const AVCodec* encoder = avcodec_find_encoder(AV_CODEC_ID_MP3);
+			if (!encoder) {
+				fprintf(stderr, "Codec not found\n");
+				return;
+			}
+			// 分配并初始化编码器上下文
+			encoder_ctx = avcodec_alloc_context3(encoder);
+			if (!encoder_ctx) {
+				fprintf(stderr, "Could not allocate audio codec context\n");
+				return;
+			}
+			//
+			// 1. 首先确保编码器参数正确设置
+			encoder_ctx->bit_rate = 128000;
+			encoder_ctx->channel_layout = AV_CH_LAYOUT_STEREO;  // 3 表示立体声布局
+			encoder_ctx->channels = 2;
+			encoder_ctx->sample_rate = 44100;
+			encoder_ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;  // MP3编码器需要浮点格式
+			tb = { 1, out_stream->codecpar->sample_rate };
+			encoder_ctx->time_base = tb;
+			// 打开编码器
+			if (avcodec_open2(encoder_ctx, encoder, NULL) < 0) {
+				fprintf(stderr, "Could not open codec\n");
+				return;
+			}
+			// 7. 从编码器上下文复制参数到输出流
+			ret = avcodec_parameters_from_context(out_stream->codecpar, encoder_ctx);
+			if (ret < 0) {
+				std::cerr << "Could not copy codec params to stream\n";
+				return;
+			}
+			// 打开输出文件
+			if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+				if (avio_open(&fmt_ctx->pb, iniConfig.GetValue("log", "amixAudioFilePath"), AVIO_FLAG_WRITE) < 0) {
+					std::cerr << "Could not open output file\n";
+					return;
+				}
+			}
+			// 写入文件头
+			ret = avformat_write_header(fmt_ctx, nullptr);
+			if (ret < 0) {
+				std::cerr << "Error occurred when opening output file\n";
+				return;
+			}
+			// 设置音频流参数
+			// 2. 确保输出流参数与编码器一致
+			out_stream->codecpar->codec_id = AV_CODEC_ID_MP3; // PCM = AV_CODEC_ID_PCM_SLE; // PCM 16-bit little-endian
+			out_stream->codecpar->codec_type = encoder->type;// AVMEDIA_TYPE_AUDIO;
+			out_stream->codecpar->channel_layout = encoder_ctx->channel_layout;
+			out_stream->codecpar->channels = encoder_ctx->channels;
+			out_stream->codecpar->sample_rate = encoder_ctx->sample_rate;
+			out_stream->codecpar->format = encoder_ctx->sample_fmt;
+			// 创建 SwrContext 并设置参数
+			// 3. 使用新的方式初始化重采样器
+			swr_ctx = swr_alloc();
+			if (!swr_ctx) {
+				std::cerr << "Could not allocate SwrContext\n";
+				return;
+			}
+			// 3. 明确设置重采样器参数
+			av_opt_set_channel_layout(swr_ctx, "in_channel_layout", m_audio.m_context->channel_layout, 0);
+			av_opt_set_channel_layout(swr_ctx, "out_channel_layout", encoder_ctx->channel_layout, 0);
+			av_opt_set_int(swr_ctx, "in_sample_rate", m_audio.m_context->sample_rate, 0);
+			av_opt_set_int(swr_ctx, "out_sample_rate", encoder_ctx->sample_rate, 0);
+			av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", m_audio.m_context->sample_fmt, 0);
+			av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", encoder_ctx->sample_fmt, 0);
+			// 5. 初始化重采样器
+			ret = swr_init(swr_ctx);
+			if (ret < 0) {
+				char errbuf[1024];
+				av_strerror(ret, errbuf, sizeof(errbuf));
+				std::cerr << "Failed to initialize resampler: " << errbuf << std::endl;
+				swr_free(&swr_ctx);
+				return;
+			}
+			// 添加采样计数器
+			av_init_packet(&pkt);
+			output_frame = av_frame_alloc();
+			resampled_master = av_frame_alloc();
+			if (!output_frame || !resampled_master) {
+				goto _END;
+			}
 		}
 
 		
@@ -1477,7 +1247,7 @@ namespace IPCDemo
 				value->duration = av_q2d({ audio->nb_samples, audio->sample_rate });
 				
 				// 有主音则开启滤镜
-				if (getMasterFrameIfExistTest(masterAudioFrame) > 0) {
+				if (getMasterFrameIfExist() > 0) {
 					// 打印输入帧信息用于调试
 					std::cout << "Before mixing:" << std::endl;
 					std::cout << "Audio frame info"
@@ -1492,7 +1262,7 @@ namespace IPCDemo
 					{
 						std::lock_guard<std::mutex> lock(g_av_buffer.mutex);
 						FF_AV_SAMPLES& s = g_av_buffer.samples.front();
-						int processed_samples = transformMasterAudioFrameTest(masterAudioFrame, s);
+						int processed_samples = transformMasterAudioFrame(masterAudioFrame, s);
 						if (processed_samples < 0) {
 							std::cerr << "Failed to transform master frame\n";
 							goto _END;
@@ -1630,82 +1400,83 @@ namespace IPCDemo
 				}
 				
 			
-				
-				// 重采样
-				// 分配输出 AVFrame
-				// 设置输出帧的参数，直接从 out_stream 的 codecpar 获取
-				output_frame->channel_layout = encoder_ctx->channel_layout;
-				output_frame->channels = encoder_ctx->channel_layout;
-				output_frame->sample_rate = encoder_ctx->sample_rate;
-				output_frame->format = encoder_ctx->sample_fmt;
-				output_frame->nb_samples = encoder_ctx->frame_size;  // 使用输入帧的采样数
-				// 分配输出帧缓冲区
-				ret = av_frame_get_buffer(output_frame, 0);
-				if (ret < 0) {
-					char errbuf[1024];
-					av_strerror(ret, errbuf, sizeof(errbuf));
-					std::cerr << "Failed to allocate output frame buffer: " << errbuf << std::endl;
-					goto _END;
-				}
-				// 确保帧数据可写
-				ret = av_frame_make_writable(output_frame);
-				if (ret < 0) {
-					char errbuf[1024];
-					av_strerror(ret, errbuf, sizeof(errbuf));
-					std::cerr << "Failed to make frame writable: " << errbuf << std::endl;
-					goto _END;
-				}
+				if ("DEBUG" == iniConfig.GetValue("log", "DEBUG")) {
 
-
-				// 执行重采样
-				ret = swr_convert_frame(swr_ctx, output_frame, audio);
-				if (ret < 0) {
-					char errbuf[1024];
-					av_strerror(ret, errbuf, sizeof(errbuf));
-					std::cerr << "Failed to convert frame: " << errbuf << std::endl;
-
-					// 打印更多调试信息
-					std::cout << "Failed frame details:" << std::endl;
-					std::cout << "SwrContext state:"
-						<< "\n  in_channel_layout: " << swr_ctx->in_ch_layout
-						<< "\n  out_channel_layout: " << swr_ctx->out_ch_layout
-						<< "\n  in_sample_rate: " << swr_ctx->in_sample_rate
-						<< "\n  out_sample_rate: " << swr_ctx->out_sample_rate
-						<< std::endl;
-					goto _END;
-				}
-				// 设置输出帧的时间戳
-				tb= { 1, encoder_ctx->sample_rate };
-				output_frame->pts = av_rescale_q(total_samples, tb,encoder_ctx->time_base);
-				total_samples += output_frame->nb_samples;
-				// 将 AVFrame 转换为 AVPacket
-				// 将 AVFrame 发送给编码器，并将 AVFrame 转换为 AVPacket
-				ret = avcodec_send_frame(encoder_ctx, output_frame);
-				if (ret < 0) {
-					char errbuf[1024];
-					av_strerror(ret, errbuf, sizeof(errbuf));
-					std::cerr << "Error sending frame to encoder: " << errbuf << std::endl;
-					std::cerr << "Frame details:" << std::endl;
-					std::cerr << "  format: " << output_frame->format << std::endl;
-					std::cerr << "  channels: " << output_frame->channels << std::endl;
-					std::cerr << "  samples: " << output_frame->nb_samples << std::endl;
-					std::cerr << "  linesize[0]: " << output_frame->linesize[0] << std::endl;
-					goto _END;
-				}
-				// 接收编码后的 AVPacket
-				while (avcodec_receive_packet(encoder_ctx, &pkt) == 0) {
-					// 设置 packet 的流索引
-					pkt.stream_index = out_stream->index;
-
-					// 将 packet 写入输出文件
-					if (av_interleaved_write_frame(fmt_ctx, &pkt) < 0) {
-						fprintf(stderr, "Error muxing packet\n");
+					// 重采样
+					// 分配输出 AVFrame
+					// 设置输出帧的参数，直接从 out_stream 的 codecpar 获取
+					output_frame->channel_layout = encoder_ctx->channel_layout;
+					output_frame->channels = encoder_ctx->channel_layout;
+					output_frame->sample_rate = encoder_ctx->sample_rate;
+					output_frame->format = encoder_ctx->sample_fmt;
+					output_frame->nb_samples = encoder_ctx->frame_size;  // 使用输入帧的采样数
+					// 分配输出帧缓冲区
+					ret = av_frame_get_buffer(output_frame, 0);
+					if (ret < 0) {
+						char errbuf[1024];
+						av_strerror(ret, errbuf, sizeof(errbuf));
+						std::cerr << "Failed to allocate output frame buffer: " << errbuf << std::endl;
 						goto _END;
 					}
-					//// 释放 packet
-					//av_packet_unref(&pkt);
+					// 确保帧数据可写
+					ret = av_frame_make_writable(output_frame);
+					if (ret < 0) {
+						char errbuf[1024];
+						av_strerror(ret, errbuf, sizeof(errbuf));
+						std::cerr << "Failed to make frame writable: " << errbuf << std::endl;
+						goto _END;
+					}
+
+
+					// 执行重采样
+					ret = swr_convert_frame(swr_ctx, output_frame, audio);
+					if (ret < 0) {
+						char errbuf[1024];
+						av_strerror(ret, errbuf, sizeof(errbuf));
+						std::cerr << "Failed to convert frame: " << errbuf << std::endl;
+
+						// 打印更多调试信息
+						std::cout << "Failed frame details:" << std::endl;
+						std::cout << "SwrContext state:"
+							<< "\n  in_channel_layout: " << swr_ctx->in_ch_layout
+							<< "\n  out_channel_layout: " << swr_ctx->out_ch_layout
+							<< "\n  in_sample_rate: " << swr_ctx->in_sample_rate
+							<< "\n  out_sample_rate: " << swr_ctx->out_sample_rate
+							<< std::endl;
+						goto _END;
+					}
+					// 设置输出帧的时间戳
+					tb = { 1, encoder_ctx->sample_rate };
+					output_frame->pts = av_rescale_q(total_samples, tb, encoder_ctx->time_base);
+					total_samples += output_frame->nb_samples;
+					// 将 AVFrame 转换为 AVPacket
+					// 将 AVFrame 发送给编码器，并将 AVFrame 转换为 AVPacket
+					ret = avcodec_send_frame(encoder_ctx, output_frame);
+					if (ret < 0) {
+						char errbuf[1024];
+						av_strerror(ret, errbuf, sizeof(errbuf));
+						std::cerr << "Error sending frame to encoder: " << errbuf << std::endl;
+						std::cerr << "Frame details:" << std::endl;
+						std::cerr << "  format: " << output_frame->format << std::endl;
+						std::cerr << "  channels: " << output_frame->channels << std::endl;
+						std::cerr << "  samples: " << output_frame->nb_samples << std::endl;
+						std::cerr << "  linesize[0]: " << output_frame->linesize[0] << std::endl;
+						goto _END;
+					}
+					// 接收编码后的 AVPacket
+					while (avcodec_receive_packet(encoder_ctx, &pkt) == 0) {
+						// 设置 packet 的流索引
+						pkt.stream_index = out_stream->index;
+
+						// 将 packet 写入输出文件
+						if (av_interleaved_write_frame(fmt_ctx, &pkt) < 0) {
+							fprintf(stderr, "Error muxing packet\n");
+							goto _END;
+						}
+						//// 释放 packet
+						//av_packet_unref(&pkt);
+					}
 				}
-			
 
 				av_frame_move_ref(value->frame, audio);
 				m_audio.m_queue.Push();
@@ -1714,19 +1485,21 @@ namespace IPCDemo
 
 	_END:
 		
-		// 清理...
-		av_frame_free(&output_frame);
-		av_frame_free(&resampled_master);
-		swr_free(&swr_ctx);
-		avcodec_free_context(&encoder_ctx);
-		// 写入文件尾
-		av_packet_unref(&pkt); // 清理最后的pkt
-		av_write_trailer(fmt_ctx);
-		// 清理资源
-		if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-			avio_close(fmt_ctx->pb);
+		if ("DEBUG" == iniConfig.GetValue("log", "DEBUG")) {
+			// 清理...
+			av_frame_free(&output_frame);
+			av_frame_free(&resampled_master);
+			swr_free(&swr_ctx);
+			avcodec_free_context(&encoder_ctx);
+			// 写入文件尾
+			av_packet_unref(&pkt); // 清理最后的pkt
+			av_write_trailer(fmt_ctx);
+			// 清理资源
+			if (!(fmt_ctx->oformat->flags & AVFMT_NOFILE)) {
+				avio_close(fmt_ctx->pb);
+			}
+			avformat_free_context(fmt_ctx);
 		}
-		avformat_free_context(fmt_ctx);
 
 
 		swr_free(&mix_swr_ctx);

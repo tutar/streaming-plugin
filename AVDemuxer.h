@@ -175,9 +175,6 @@ namespace IPCDemo
 	private:
 		BOOL   InitializeFilter(AVFrame* video);
 		void   UninitializeFilter();
-
-		BOOL   InitialMasterAudioFilter();
-
 		BOOL   InitializeAFilter(AVFrame* audio, AVFrame* masterAudio);
 
 		void   UninitializeAFilter();

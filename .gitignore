@@ -2,6 +2,13 @@
 .vscode/
 .vs/
 
+vcpkg_installed/
+
+test/
+
+settings.ini
+bin/settings.ini
+
 # sherpa-onnx 依赖文件
 lib/cargs.lib 
 lib/espeak-ng.lib 
@@ -21,6 +28,7 @@ lib/ucd.lib
 
 #模型文件
 resource/vits-melo-tts-zh_en/
+bin/resource/vits-melo-tts-zh_en/
 
 # 编译生成的文件和目录：
 *.obj
@@ -31,6 +39,7 @@ resource/vits-melo-tts-zh_en/
 x64/
 Win32/
 *.exe
+
 
 #IDE配置文件
 *.suo

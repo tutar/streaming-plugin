@@ -1,0 +1,10 @@
+{
+  "name": "streaming-plugin",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "simpleini",
+    "jsoncpp",
+    "cpp-httplib",
+    "qt5"
+  ]
+}

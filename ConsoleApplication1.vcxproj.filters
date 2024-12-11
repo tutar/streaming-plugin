@@ -30,6 +30,15 @@
     <ClCompile Include="ByteQueue.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="DouYin.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="test\TestAmix.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Dialog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVDemuxer.h">
@@ -47,8 +56,41 @@
     <ClInclude Include="ByteQueue.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="DouYin.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
+    <None Include="vcpkg.json" />
+    <None Include="vcpkg-configuration.json" />
+    <None Include=".gitignore" />
+    <None Include="resource\vits-melo-tts-zh_en\date.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\LICENSE" />
+    <None Include="resource\vits-melo-tts-zh_en\model.int8.onnx" />
+    <None Include="resource\vits-melo-tts-zh_en\model.onnx" />
+    <None Include="resource\vits-melo-tts-zh_en\new_heteronym.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\number.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\phone.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\README.md" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\char_state_tab.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_emit.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_start.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_trans.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\hmm_model.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\idf.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\jieba.dict.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\README.md" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\stop_words.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\user.dict.utf8" />
+    <None Include="changelog.md" />
+    <None Include="settings.ini" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resource\vits-melo-tts-zh_en\lexicon.txt" />
+    <Text Include="resource\vits-melo-tts-zh_en\tokens.txt" />
   </ItemGroup>
 </Project>

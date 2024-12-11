@@ -77,6 +77,13 @@
     <OutDir>$(SolutionDir)bin</OutDir>
     <IncludePath>$(VC_IncludePath);$(WindowsSDK_IncludePath);D:\program\vcpkg-2024.10.21\installed\x64-windows\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);D:\program\vcpkg-2024.10.21\installed\x64-windows\lib</LibraryPath>
+    <CopyLocalDeploymentContent>true</CopyLocalDeploymentContent>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
+  <PropertyGroup>
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -114,11 +121,12 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>stdc11</LanguageStandard_C>
+      <AdditionalIncludeDirectories>D:\open\Livestreaming\ConsoleApplication1\tts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>lib\avcodec.lib;lib\avdevice.lib;lib\avfilter.lib;lib\avformat.lib;lib\avutil.lib;lib\swresample.lib;lib\swscale.lib;lib\PipeSDK.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>lib\avcodec.lib;lib\avdevice.lib;lib\avfilter.lib;lib\avformat.lib;lib\avutil.lib;lib\swresample.lib;lib\swscale.lib;lib\PipeSDK.lib;lib\cargs.lib;lib\espeak-ng.lib;lib\kaldi-decoder-core.lib;lib\kaldi-native-fbank-core.lib;lib\onnxruntime.lib;lib\piper_phonemize.lib;lib\sherpa-onnx-c-api.lib;lib\sherpa-onnx-core.lib;lib\sherpa-onnx-cxx-api.lib;lib\sherpa-onnx-fst.lib;lib\sherpa-onnx-fstfar.lib;lib\sherpa-onnx-kaldifst-core.lib;lib\sherpa-onnx-portaudio_static.lib;lib\ssentencepiece_core.lib;lib\ucd.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
     </Link>
@@ -133,7 +141,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/UTF-8</AdditionalOptions>
-      <AdditionalIncludeDirectories>D:\open\Livestreaming\ConsoleApplication1\tts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\program\vcpkg-2024.10.21\installed\x64-windows\include\qt5;D:\open\Livestreaming\ConsoleApplication1\tts;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <Optimization>Disabled</Optimization>
@@ -153,17 +161,58 @@
     <ClCompile Include="ByteQueue.cpp" />
     <ClCompile Include="Common.cpp" />
     <ClCompile Include="ConsoleApplication1.cpp" />
+    <ClCompile Include="Dialog.cpp" />
+    <ClCompile Include="DouYin.cpp" />
     <ClCompile Include="Resampler.cpp" />
+    <ClCompile Include="test\TestAmix.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVDemuxer.h" />
     <ClInclude Include="ByteQueue.h" />
     <ClInclude Include="Common.h" />
+    <ClInclude Include="DouYin.h" />
     <ClInclude Include="PipeDef.h" />
     <ClInclude Include="Resampler.h" />
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="resource\**">
+      <CopyToOutputDirectory>$(CopyToOutputDirectory)</CopyToOutputDirectory>
+    </Content>
+    <Content Include="settings.ini">
+      <CopyToOutputDirectory>$(CopyToOutputDirectory)</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".gitignore" />
+    <None Include="changelog.md" />
     <None Include="README.md" />
+    <None Include="resource\vits-melo-tts-zh_en\date.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\hmm_model.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\idf.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\jieba.dict.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\char_state_tab.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_emit.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_start.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\pos_dict\prob_trans.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\README.md" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\stop_words.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\dict\user.dict.utf8" />
+    <None Include="resource\vits-melo-tts-zh_en\LICENSE" />
+    <None Include="resource\vits-melo-tts-zh_en\model.int8.onnx" />
+    <None Include="resource\vits-melo-tts-zh_en\model.onnx" />
+    <None Include="resource\vits-melo-tts-zh_en\new_heteronym.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\number.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\phone.fst" />
+    <None Include="resource\vits-melo-tts-zh_en\README.md" />
+    <None Include="settings.ini" />
+    <!-- <None Include="settings.ini" /> -->
+    <None Include="vcpkg-configuration.json" />
+    <None Include="vcpkg.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="resource\vits-melo-tts-zh_en\lexicon.txt" />
+    <Text Include="resource\vits-melo-tts-zh_en\tokens.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

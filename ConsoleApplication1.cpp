@@ -17,26 +17,29 @@
 #include <chrono>
 #include <string>
 #include <sstream>
-//#include <QtWidgets/QApplication>
-//#include <QtWidgets/QDialog>
-//#include <QtWidgets/QPushButton>
-//#include <QtWidgets/QVBoxLayout>
-// sherpa-onnx c-api
+
+#include <QtWidgets/QApplication.h>
+#include <QtWidgets/QWidget>
+#include <QtWidgets/QDialog>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QMessageBox>
+#include <QtCore/QTemporaryFile>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtWidgets/QSlider>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QFileDialog>
+#include <QtWidgets/QFormLayout>
+#include <QtGui/QPalette>
+
 #include <sherpa-onnx/c-api/c-api.h>
 #include <sherpa-onnx/c-api/cxx-api.h>
 #include <sherpa-onnx/cargs.h>
-//#include <sherpa-onnx/offline-tts.h>
+#include <SimpleIni.h>
 
-
-//#include <SDL2/SDL.h>
-//#include <iostream>
-
-
-#define CHECK_CHANNELS_CONSISTENCY(frame) \
-    av_assert2(!(frame)->channel_layout || \
-               (frame)->channels == \
-               av_get_channel_layout_nb_channels((frame)->channel_layout))
-
+#include "DouYin.h"
 
 BOOL                    m_stop{ FALSE };
 AudioParameter          g_ap1;
@@ -47,7 +50,7 @@ std::thread             g_task1;
 std::thread             g_task2;
 IPipeClient*			g_client{ NULL };
 std::ofstream           g_logFile;
-std::unordered_map<std::string, long> user_like_likes;//用户点赞数累计 临时客户端方案
+DouYin::LiveRoom*		g_live_room;
 
 std::wstring to_wide_string(const std::string& input)
 {
@@ -143,17 +146,6 @@ std::string constructSubscribeEvent(const std::string& eventName) {
 	return text;	
 }
 
-void log_callback(void* ptr, int level, const char* fmt, va_list vargs) {
-	// 忽略低于 av_log_get_level() 阈值的日志消息
-	if (level > av_log_get_level()) {
-		return;
-	}
-
-	// 打印日志消息
-	vfprintf(stderr, fmt, vargs);
-	fprintf(stderr, "\n");
-}
-
 
 static int32_t AudioGeneratedCallback(const float* s, int32_t n, void* arg) {
 	// push samples
@@ -177,137 +169,6 @@ static int32_t AudioGeneratedCallback(const float* s, int32_t n, void* arg) {
 	}
 	
 	return 1;
-}
-
-// 语音合成
-void tts(std::string text) {
-	SherpaOnnxOfflineTtsConfig config;
-	memset(&config, 0, sizeof(config));
-
-	int32_t sid = 0;
-	std::string filename = "C:\\Users\\tutar\\generated.wav";
-
-	std::string currentPath = __FILE__;
-	std::string::size_type pos = currentPath.find_last_of("\\/");
-	currentPath = currentPath.substr(0, pos + 1); // 获取当前文件的目录路径
-
-	std::string resourceRoot = currentPath+"resource";
-
-	std::string modelPath = resourceRoot + "/vits-melo-tts-zh_en/model.onnx";
-	config.model.vits.model = modelPath.c_str();
-
-	std::string lexiconPath = resourceRoot + "/vits-melo-tts-zh_en/lexicon.txt";
-	config.model.vits.lexicon = lexiconPath.c_str();
-
-	std::string tokensPath = resourceRoot + "/vits-melo-tts-zh_en/tokens.txt";
-	config.model.vits.tokens = tokensPath.c_str();
-	//config.model.vits.noise_scale = atof(value);
-	//config.model.vits.noise_scale_w = atof(value);
-	//config.model.vits.length_scale = atof(value);
-	//config.model.num_threads = atoi(value);
-	//config.model.provider = value;
-	//config.model.debug = atoi(value);
-	//config.max_num_sentences = atoi(value);
-	//sid = atoi(value);
-
-	// 释放文件
-	//free((void*)(filename.c_str()));
-
-	std::string fstsPath = resourceRoot + "/vits-melo-tts-zh_en/date.fst" +"," + resourceRoot + "/vits-melo-tts-zh_en/number.fst";
-	config.rule_fsts = fstsPath.c_str();
-
-	std::string dataPath = resourceRoot + "/vits-melo-tts-zh_en/dict";
-	config.model.vits.dict_dir = dataPath.c_str();
-	config.model.debug = 1;
-
-	SherpaOnnxOfflineTts* tts = SherpaOnnxCreateOfflineTts(&config);
-
-	const char* textChar = text.c_str();
-	int sampleRate = SherpaOnnxOfflineTtsSampleRate(tts);
-
-	const SherpaOnnxGeneratedAudio* audio = SherpaOnnxOfflineTtsGenerateWithCallbackWithArg(tts, textChar, sid, 1.0, AudioGeneratedCallback, &sampleRate);
-
-	SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, filename.c_str());
-
-	SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
-	SherpaOnnxDestroyOfflineTts(tts);
-
-	// 删除生成文件
-	//free((void*)(filename.c_str()));
-
-}
-
-
-
-
-
-// 直播间互动数据处理
-std::string liveDataHandler(const Json::Value& payload) {
-
-	std::map<std::string,std::list<std::string>> live_replys;
-	std::string like_reply_key="like_reply";
-	std::string comment_reply_key="comment_reply";
-	std::string gift_reply_key="gift_reply";
-	// 遍历payload内容
-	for (const Json::Value& msg : payload) {
-		// 语音优先顺序：
-		// 业务问题必答，积极地评论感谢、非积极和超界限的忽略、恶劣的上报）-
-		//（大礼物每次/空闲每次/非空闲忽略）礼物-
-		//（空闲每次/非空闲忽略）进房欢迎-
-		//（单人累计20各、感谢仅一次）点赞-
-		
-		// demo阶段：
-		// 评论必答
-		// 礼物感谢
-		// 进房欢迎
-		// 单人累计点赞感谢
-		// 
-		// 视频音频
-		
-		// 互动数据处理 1.点赞 2.评论 3.礼物 ？.进房
-		if(msg["msg_type"].asInt() == 1) {
-			// 优先级最低的回复，某人点赞累加到20感谢xxx点赞
-			std::string open_id = msg["sec_open_id"].asString();
-			auto it = user_like_likes.find(open_id);
-			if (it == user_like_likes.end())
-			{
-				user_like_likes[open_id] = 1L;
-			}
-			else {
-				// 重复点赞，忽略
-				if (user_like_likes[open_id] != -1)
-				{
-					// 在点赞回复中添加点赞消息
-					// 如果没有列表则创建一个
-					if (live_replys.find(like_reply_key) == live_replys.end()) live_replys[like_reply_key] = std::list<std::string>();
-
-					user_like_likes[open_id]++;
-					if (user_like_likes[open_id] > 20) {
-						// 有人点赞超过20次，发送点赞消息
-						std::string like_reply = "感谢" + msg["nickname"].asString() + "的点赞。欢迎大家给主播点点赞~，你们的支持是我们最大的动力。";
-						live_replys[like_reply_key].push_back(like_reply);
-
-						// 仅回复一次
-						user_like_likes[open_id] = -1;
-					}
-				}
-			}
-		}else if(msg["msg_type"].asInt() == 2) {
-			// TODO 读取评论 分析 回复
-		}
-		else if (msg["msg_type"].asInt() == 3) {
-			// 非常感谢 xx 送的礼物
-			if (live_replys.find(gift_reply_key) == live_replys.end()) live_replys[gift_reply_key] = std::list<std::string>();
-
-			std::string gift_reply = "非常感谢" + msg["nickname"].asString() + "送的礼物~，谢谢您的支持。不鼓励大家刷礼物，大家多看看商品，你们买到合意的商品才是主播最大的动力~";
-			live_replys[gift_reply_key].push_back(gift_reply);
-		}
-	}
-
-	// TODO 截取x秒进行
-	// TODO tts输出语音
-	std::string reply = "您们好 我是今天的主播，欢迎大家来到这里。";
-	return reply;
 }
 
 //// 配置面板类
@@ -352,12 +213,20 @@ void OnMessagePump1()
 			g_client->WritePacket(&pkt, 1000);
 		};
 	//std::filesystem::path path("D:\\open\\Livestreaming\\tiger_natual.mp4");
-	 std::filesystem::path path("D:\\open\\Livestreaming\\home.mp4");
-	//std::filesystem::path path("D:\\open\\Livestreaming\\longLei.MP3");
+	 //std::filesystem::path path("D:\\open\\Livestreaming\\streaming-example.mp4");
+	
+	if (DouYin::Config::getInstance().getBgVideoPath().empty()) {
+		// 弹框重新填
+	}
+	std::filesystem::path path(DouYin::Config::getInstance().getBgVideoPath());
 	g_demuex1->Open(path.u8string());
 
 
-	tts("您们好 我是今天的主播，欢迎大家来到这里。总结来说，这个宏定义整型列表选项。");
+	//std::string reply = "您们好\n\n1.我是今天的主播，欢迎大家来到这里。您们\n\n2. 我是今天的主播，欢迎大家来到这里。您们好\n\n3. 我是今天的主播，欢迎大家来到这里。您们好 \n\n 4. 我是今天的主播，欢迎大家来到这里。";
+	////std::string reply = "您们好1.我是今天的主播，欢迎大家来到这里。您们2. 我是今天的主播，欢迎大家来到这里。您们好3. 我是今天的主播，欢迎大家来到这里。您们好4. 我是今天的主播，欢迎大家来到这里。";
+	////std::string reply = "您们好 我是今天的主播，欢迎大家来到这里。您们好我是今天的主播，欢迎大家来到这里。";
+	//
+	//DouYin::TTS::getInstance().generate(reply, AudioGeneratedCallback);
 
 	for (;;)
 	{
@@ -415,32 +284,151 @@ int main(int argc, char* argv[]) {
 }
 */
 
-
-
-int main() {
+//程序启动做些预处理
+void OnApplicationStart() {
 
 	// ffmpeg log
-	av_log_set_level(AV_LOG_ERROR);
-	av_log_set_callback(log_callback);
+	//av_log_set_level(AV_LOG_ERROR);
+	//av_log_set_callback([](void* ptr, int level, const char* fmt, va_list vargs) {
+	//	// 打印日志消息
+	//		vfprintf(stderr, fmt, vargs);
+	//		fprintf(stderr, "\n");
+	//	});
 
-	OnMessagePump1();
-	return 0;
+	// 加载配置文件
+	CSimpleIniA& config = DouYin::Config::getInstance().getIniConfig();
+	std::time_t t = time(nullptr);
+	char   filetime[256];
+	//strftime(filetime, sizeof(filetime), "%Y-%m-%d-%H-%M-%S", localtime(&t));
+	strftime(filetime, sizeof(filetime), "%Y-%m-%d-%H", localtime(&t));
+	std::string fileName = config.GetValue("log", "logFile")? config.GetValue("log", "logFile"):std::string(filetime).append(std::string(".log"));
+	std::string filePathName = std::string(config.GetValue("log", "logPath")).append(std::string("/")).append(fileName);
+	g_logFile.open(filePathName.c_str());
+
+	g_live_room = new DouYin::LiveRoom();
+
 }
 
-int mainbak(int argc, char* argv[])
+void testContent() {
+	std::string liveEventMessate = "\
+	{\
+  \"type\": \"EVENT_MESSAGE\",\
+  \"eventName\": \"OPEN_LIVE_DATA\", \
+  \"payload\": [\
+    {\
+      \"msg_id\": \"7352602227091444780\",\
+      \"timestamp\": 1711939362000,\
+      \"msg_type\": 2,\
+      \"msg_type_str\": \"live_comment\",\
+      \"sec_open_id\": \"2e441624-b99f-5f05-a632-d3f7c92df768\",\
+      \"avatar_url\": \"https://p3.douyinpic.com/aweme/100x100/aweme-avatar/mosaic-legacy_3796_2975850990.jpeg?from=3067671334\",\
+      \"nickname\": \"bor432\",\
+      \"content\": \"主播厉害\",\
+      \"user_privilege_level\": 1,\
+      \"is_follow_anchor\": true,\
+      \"fansclub_level\": 1\
+	}\
+	  ]\
+	}\
+";
+
+	Json::Reader reader;
+	Json::Value root;
+	bool parsingSuccessful = reader.parse(liveEventMessate, root);
+	std::string reply = g_live_room->liveDataHandler(root["payload"]);
+	std::cout << reply << std::endl;
+}
+/*
+void onMessageReceived() {
+	// 接收到消息时，显示对话框
+	QDialog dialog;
+	dialog.setWindowTitle("配置页面");
+	QVBoxLayout* layout = new QVBoxLayout(&dialog);
+
+	QPushButton* button = new QPushButton("保存配置");
+	layout->addWidget(button);
+	QObject::connect(button, &QPushButton::clicked, [&]() {
+		// 处理配置
+		QMessageBox::information(&dialog, "信息", "配置已保存。");
+		dialog.close();
+		});
+
+	dialog.setLayout(layout);
+	dialog.exec(); // 显示模态对话框
+
+	// 对话框关闭后，应用继续在后台运行
+}
+*/
+
+
+
+void drawConfigDialog() {
+
+	// 显示对话框
+	QMessageBox msgBox;
+	msgBox.setWindowTitle("事件通知");
+	msgBox.setText("请填写以下信息：");
+
+	// 添加自定义字段
+	// 这里只是一个示例，你需要根据实际需求添加更多的字段
+	msgBox.setInformativeText("时间: 数字: 文件: 文本: 音量:");
+
+	// 用户点击确定后处理数据
+	QObject::connect(&msgBox, &QMessageBox::accepted, [&]() {
+		// 收集数据
+		QJsonObject dataObject;
+		// 假设你已经有了这些值
+		dataObject["time"] = "12:00";
+		dataObject["number"] = 123;
+		dataObject["file"] = "/path/to/file";
+		dataObject["text"] = "Some text";
+		dataObject["volume"] = QJsonValue(70); // 转换为QJsonValue类型
+
+
+		// 保存到临时文件
+		QTemporaryFile file("temp_file.txt"); // 初始化QTemporaryFile对象
+		if (file.open()) {
+			QJsonDocument doc(dataObject);
+			file.write(doc.toJson());
+			file.close();
+		}
+
+		// 保存到C++配置对象（这里只是一个示例，你需要根据实际情况实现）
+		// ConfigObject config;
+		// config.setData(dataObject);
+		});
+
+	msgBox.exec(); // 显示模态对话框
+}
+
+
+//int main(int argc, char* argv[]) {
+//	//优先异步加载模型
+//	DouYin::TTS::getInstance();
+//
+//	DouYin::Dialog::showConfig(0, nullptr);
+//	OnApplicationStart();
+//
+//	// 使用模型前等待加载完成
+//	while (DouYin::TTS::getInstance().isInitialized() == false) {
+//		Sleep(1);
+//	}
+//
+//	//testContent();
+//	//OnMessagePump1();
+//	return 1;
+//
+//}
+int main(int argc, char* argv[])
 {
     if (argc <= 3)
     {
         std::cout << "input params invalid!" << std::endl;
         return -1;
     }
-
-	std::time_t t = time(nullptr);
-	char   filetime[256];
-	//strftime(filetime, sizeof(filetime), "%Y-%m-%d-%H-%M-%S", localtime(&t));
-	strftime(filetime, sizeof(filetime), "%Y-%m-%d-%H", localtime(&t));
-	std::string filename = std::string("D:\\open\\Livestreaming\\ConsoleApplication1\\bin\\").append(std::string("client_").append(filetime).append(std::string(".log")));
-	g_logFile.open(filename.c_str());
+	//优先异步加载模型
+	DouYin::TTS::getInstance();
+	OnApplicationStart();
 
 	logFile("starging.........:" + std::string(argv[1]) + " " + std::string(argv[2]) + " " + std::string(argv[3]));
 
@@ -454,12 +442,6 @@ int mainbak(int argc, char* argv[])
 	CreatePipeClient(&g_client);
 	logFile("Pipe Client create success.........");
 
-	//std::time_t t = time(nullptr);
-    //char   filetime[256];
-    //strftime(filetime, sizeof(filetime), "%Y-%m-%d-%H-%M-%S", localtime(&t));
-    //std::string filename = std::string("D:\\open\\Livestreaming\\ConsoleApplication1\\bin\\").append(std::string("client_").append(filetime).append(std::string(".log")));
-    //g_logFile.open(filename.c_str());
-
     g_client->SetLogMessageCallback(LogMessageCallbackHandler);
 	g_client->SetCallback([](IPC_EVENT_TYPE type, UINT32 msg, const CHAR* data, UINT32 size, void* args) -> void {
 		IPipeClient* pThis = static_cast<IPipeClient*>(args);
@@ -471,9 +453,13 @@ int mainbak(int argc, char* argv[])
 			case PipeSDK::EVENT_CONNECTED:
 			{
 				logFile("已连接，开始推送流....");
+				// 弹框配置
+				DouYin::Dialog::showConfig(0, nullptr);
+
 				std::cout << std::string("EVENT_CONNECTED") << std::endl;
+
 				g_task1 = std::thread(OnMessagePump1);
-				g_task2 = std::thread(OnMessagePump2);
+				//g_task2 = std::thread(OnMessagePump2);
 
 				// 订阅直播间开放数据推送事件​
 				std::string event_req = constructSubscribeEvent("OPEN_LIVE_DATA");
@@ -485,7 +471,9 @@ int mainbak(int argc, char* argv[])
 				std::cout << std::string("EVENT_BROKEN") << std::endl;
 				break;
 			case PipeSDK::EVENT_DISCONNECTED:
-				std::cout << std::string("EVENT_DISCONNECTED") << std::endl;
+				// 直播伴侣主动退出，则关闭插件
+				logFile("直播伴侣主动退出，则关闭插件:" + std::string("EVENT_DISCONNECTED"));
+				m_stop = TRUE;
 				break;
 			case PipeSDK::EVENT_CONNECTION_RESET:
 				std::cout << std::string("EVENT_CONNECTION_RESET") << std::endl;
@@ -508,10 +496,11 @@ int mainbak(int argc, char* argv[])
 					if (type.isString() && eventName.isString() && type.asString() == "event" && eventName.asString() == "OPEN_LIVE_DATA")
 					{
 						logFile("replay generate based on live data");
-						std::string reply = liveDataHandler(root["params"]["payload"]);
+						std::string reply = g_live_room->liveDataHandler(root["params"]["payload"]);
 						
 						// 跟视频语音合成
-						tts(reply);
+						//tts(reply);
+						DouYin::TTS::getInstance().generate(reply, AudioGeneratedCallback);
 						logFile("tts finished:" + reply);
 					}
 
@@ -558,31 +547,49 @@ int mainbak(int argc, char* argv[])
 		},
 		g_client);
 
-	g_client->Open((to_wide_string(pipeName)).c_str(), maxChannels);
+	// 使用模型前等待加载完成
+	while (DouYin::TTS::getInstance().isInitialized() == false) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
 
+	g_client->Open((to_wide_string(pipeName)).c_str(), maxChannels);
 
 
 	std::string text;
 	while (1)
 	{
-		std::getline(std::cin, text);
-		if (text == "C")
-
-		{
-			m_stop = TRUE;
+		if (m_stop){
+			//m_stop = TRUE;
 			if (g_task1.joinable())
 				g_task1.join();
 			if (g_task2.joinable())
 				g_task2.join();
 			if (g_client != NULL)
 				g_client->Close();
-
 			break;
 		}
-		if (g_client != NULL)
-			logFile("sub Msg:" + text);
-			g_client->SendMessage(101, (const CHAR*)text.data(), text.size());
+
+		if (std::string("DEBUG").compare(DouYin::Config::getInstance().getIniConfig().GetValue("log", "level"))) {
+			std::getline(std::cin, text);
+			if (text == "C") {
+				m_stop = TRUE;
+				if (g_task1.joinable())
+					g_task1.join();
+				if (g_task2.joinable())
+					g_task2.join();
+				if (g_client != NULL)
+					g_client->Close();
+
+				break;
+			}
+			if (g_client != NULL) {
+				logFile("sub Msg:" + text);
+				g_client->SendMessage(101, (const CHAR*)text.data(), text.size());
+			}
+		}
+		Sleep(20);
 	}
+
 	if (g_client != NULL)
 		g_client->Close();
 	if (g_task1.joinable())
